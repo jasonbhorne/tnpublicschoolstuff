@@ -1,0 +1,114 @@
+#This works with the Pacing Guide export csv file from TN Compass. It creates a file for each school on the date in question. It also creates a district view of remaining evaluations. 
+import pandas as pd
+df=pd.read_csv('Pacing Guide.csv')
+df
+
+#This creates a .csv file for each school. 
+import os
+import pandas as pd
+from datetime import datetime
+import openpyxl
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
+
+# Create a folder with the current date
+today = datetime.today().strftime('%Y-%m-%d')
+if not os.path.exists(today):
+    os.makedirs(today)
+
+# Keep specified columns and filter
+columns_to_keep = ['Academic Year','School Name', 'Educator Type', 'Educator License Number',
+                   'Educator Name', 'Educator Email', 'PYE', 'Evaluation Model',
+                   'Pacing License', 'Minimum Instruction Requirement', 'Instruction Observed']
+
+df = df[columns_to_keep]
+df = df[df['PYE'] != 'Yes']
+
+# Add 'Observations Remaining' column
+df['Observations Remaining'] = df['Minimum Instruction Requirement'] - df['Instruction Observed']
+
+# Iterate over unique school names
+for school in df['School Name'].unique():
+    if school is not None:  # To handle NaNs
+        school_df = df[df['School Name'] == school]
+
+        # Define the Excel filepath
+        filepath = os.path.join(today, f"{school}_{today}.xlsx")
+
+        # Write DataFrame to Excel
+        school_df.to_excel(filepath, index=False, sheet_name='Data')
+
+        # Open the Excel workbook and select the 'Data' sheet
+        book = openpyxl.load_workbook(filepath)
+        sheet = book['Data']
+
+        # Autosize columns
+        for column in sheet.columns:
+            max_length = 0
+            for cell in column:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            adjusted_width = (max_length + 2)
+            sheet.column_dimensions[get_column_letter(column[0].column)].width = adjusted_width
+
+        # Define the table and add it to the worksheet
+        max_row = sheet.max_row
+        max_col = sheet.max_column
+        table = Table(displayName="DataTable", ref=f"A1:{get_column_letter(max_col)}{max_row}")
+        sheet.add_table(table)
+
+        # Style the table
+        style = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
+        table.tableStyleInfo = style
+
+        # Enable total row
+        table.showTotals = True
+
+        # Add total row formulas for the specified columns
+        for col_num in [10, 11, 12]:  # Adjust based on your specific columns, 1-based index
+            col_letter = get_column_letter(col_num)
+            sheet[f"{col_letter}{max_row + 1}"] = f"=SUBTOTAL(109,{col_letter}2:{col_letter}{max_row})"
+
+        # Save the workbook
+        book.save(filepath)
+
+#This creates the district summary and saves it to file called "weekly_totals.csv"
+# Create an empty DataFrame to store summary information
+summary_df = pd.DataFrame(columns=['School Name', 'Total Educators', 'Total Minimum Instruction Requirement', 'Total Instruction Observed', 'Total Observations Remaining'])
+
+# Populate the summary DataFrame
+for school in df['School Name'].unique():
+    if school is not None:
+        school_df = df[df['School Name'] == school]
+        total_educators = len(school_df)
+        total_min_instruction = school_df['Minimum Instruction Requirement'].sum()
+        total_instruction_observed = school_df['Instruction Observed'].sum()
+        total_observations_remaining = school_df['Observations Remaining'].sum()
+
+        summary_df = summary_df.append({
+            'School Name': school,
+            'Total Educators': total_educators,
+            'Total Minimum Instruction Requirement': total_min_instruction,
+            'Total Instruction Observed': total_instruction_observed,
+            'Total Observations Remaining': total_observations_remaining
+        }, ignore_index=True)
+
+ # Define the Excel filepath
+summary_filepath = os.path.join(today, f"{school}_{today}.xlsx")
+        
+# Define the Excel filepath for summary
+summary_df = pd.concat([summary_df, pd.DataFrame({...}, index=[0])], ignore_index=True)
+
+# Write Summary DataFrame to Excel
+summary_df.to_excel(summary_filepath, index=False, sheet_name='Summary')
+
+# Create a pivot table to get the totals by school
+pivot_table = filtered_df.pivot_table(index='School Name', 
+                                      values=['Minimum Instruction Requirement', 'Instruction Observed', 'Observations Remaining'],
+                                      aggfunc='sum')
+
+# Display the pivot table
+print(pivot_table)
+
+# Write the pivot table to a new Excel file called 'weekly_totals.xlsx'
+pivot_table.to_excel('weekly_totals.xlsx')
